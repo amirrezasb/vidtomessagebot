@@ -1,48 +1,66 @@
 import os
-import asyncio
-from telethon import TelegramClient, events
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import logging
 
-# --- از این مقادیر عمومی استفاده می‌کنیم ---
-# این مقادیر برای دور زدن خطای ساخت اپلیکیشن تلگرام است.
-API_ID = 21724  # API ID عمومی برای اپلیکیشن دسکتاپ تلگرام
-API_HASH = '3e03d13b31354f9d747a48c5a242f310'  # API Hash عمومی
+# --- فقط توکن ربات خود را اینجا وارد کنید ---
+TOKEN = "8296716466:AAHEX-JkyHBO3HIY4W2KCBAl_SS489wZEjM"
 
-# --- این خط مهم‌ترین بخش است! ---
-# فقط توکن ربات خود را که از BotFather گرفته‌اید، در اینجا وارد کنید.
-BOT_TOKEN = '8296716466:AAHEX-JkyHBO3HIY4W2KCBAl_SS489wZEjM' # اینجا توکن ربات خود را وارد کنید
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# ایجاد یک کلاینت تلگرام
-bot = TelegramClient('bot_session', API_ID, API_HASH)
-
-@bot.on(events.NewMessage(pattern='/start'))
-async def start(event):
+def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
-    await event.reply('سلام! لطفا یک ویدیو برای من بفرستید تا آن را به ویدیو مسیج (دایره‌ای) تبدیل کنم. (نسخه نهایی و قطعی)')
+    update.message.reply_text('سلام! لطفا یک ویدیو بفرستید تا آن را به ویدیو مسیج تبدیل کنم. (نسخه نهایی و قطعی)')
 
-@bot.on(events.NewMessage(func=lambda e: e.video))
-async def video_handler(event):
-    """Handles video messages and converts them to video notes."""
-    try:
-        waiting_message = await event.reply('لطفا کمی صبر کنید، در حال تبدیل ویدیو...')
-        video_path = await event.download_media()
-        await bot.send_file(
-            event.chat_id,
-            video_path,
-            video_note=True, # این کلید جادویی است!
-            reply_to=event.id
-        )
-        if video_path and os.path.exists(video_path):
-            os.remove(video_path)
-        await waiting_message.delete()
-    except Exception as e:
-        print(f"Error: {e}")
-        await event.reply('متاسفم، در هنگام تبدیل ویدیو مشکلی پیش آمد. لطفاً دوباره تلاش کنید.')
+def convert_to_video_note(update: Update, context: CallbackContext) -> None:
+    """Downloads the video and sends it back as a video note."""
+    message = update.message
+    if message.video:
+        try:
+            waiting_message = message.reply_text('لطفا کمی صبر کنید، در حال دانلود و تبدیل ویدیو...')
 
-async def main():
+            # Get the file object
+            video_file = context.bot.get_file(message.video.file_id)
+
+            # Download the video to a temporary path
+            temp_video_path = f"{message.video.file_id}.mp4"
+            video_file.download(temp_video_path)
+
+            # Get video dimensions for the video note
+            dimension = min(message.video.width, message.video.height)
+
+            # Open the downloaded file and send it as a video note
+            with open(temp_video_path, 'rb') as video_stream:
+                context.bot.send_video_note(
+                    chat_id=message.chat_id,
+                    video_note=video_stream,
+                    duration=message.video.duration,
+                    length=dimension,
+                    reply_to_message_id=message.message_id
+                )
+
+            # Delete the waiting message
+            context.bot.delete_message(chat_id=message.chat_id, message_id=waiting_message.message_id)
+
+            # Clean up the downloaded file
+            os.remove(temp_video_path)
+
+        except Exception as e:
+            logger.error(f"Error processing video: {e}")
+            message.reply_text(f'متاسفم، مشکلی پیش آمد: {e}')
+    else:
+        message.reply_text('این یک ویدیو نیست.')
+
+def main() -> None:
     """Start the bot."""
-    await bot.start(bot_token=BOT_TOKEN)
-    print("Bot started successfully with Telethon!")
-    await bot.run_until_disconnected()
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.video, convert_to_video_note))
+    logger.info("Bot started successfully!")
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
